@@ -8,7 +8,7 @@
     MemoryAmount = 8GB
     CPUCores = 4
     NetworkSwitch = "Default Switch"
-    VHDPath = "C:\Users\Public\Documents\Hyper-V\Virtual Hard Disks\"
+    VHDPath = "C:\ProgramData\Microsoft\Windows\Virtual Hard Disks\"
     UnattendPath = "$PSScriptRoot"+"\autounattend.xml"
     GPUName = "AUTO"
     GPUResourceAllocationPercentage = 50
@@ -17,12 +17,18 @@
     Username = "GPUVM"
     Password = "CoolestPassword!"
     Autologon = "true"
+    # Only affects keyboard layout and other minor settings, language is predetermined by the specified ISO
+    # If you want to use the default settings by your ISO leave this parameter empty like this: ""  
+    # To find languages/region tags use the following link: https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/available-language-packs-for-windows?view=windows-11
+    Language = ""
+    # If you want to use the default setting by your ISO leave this parameter empty like this: ""
+    # To find your timezone use the following link: https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/default-time-zones?view=windows-11
+    Timezone = ""
 }
 
 Import-Module $PSSCriptRoot\Add-VMGpuPartitionAdapterFiles.psm1
 
-function Is-Administrator  
-{  
+Function Is-Administrator {  
     $CurrentUser = [Security.Principal.WindowsIdentity]::GetCurrent();
     (New-Object Security.Principal.WindowsPrincipal $CurrentUser).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)  
 }
@@ -31,9 +37,9 @@ Function Dismount-ISO {
 param (
 [string]$SourcePath
 )
-$disk = Get-Volume | Where-Object {$_.DriveType -eq "CD-ROM"} | select *
-Foreach ($d in $disk) {
-    Dismount-DiskImage -ImagePath $sourcePath | Out-Null
+    $disk = Get-Volume | Where-Object {$_.DriveType -eq "CD-ROM"} | select *
+    foreach ($d in $disk) {
+        Dismount-DiskImage -ImagePath $sourcePath | Out-Null
     }
 }
 
@@ -41,40 +47,39 @@ Function Mount-ISOReliable {
 param (
 [string]$SourcePath
 )
-$mountResult = Mount-DiskImage -ImagePath $SourcePath
-$delay = 0
-Do {
-    if ($delay -gt 15) {
-        Function Get-NewDriveLetter {
-            $UsedDriveLetters = ((Get-Volume).DriveLetter) -join ""
-             Do {
-                $DriveLetter = (65..90)| Get-Random | % {[char]$_}
+    $mountResult = Mount-DiskImage -ImagePath $SourcePath
+    $delay = 0
+    Do {
+        if ($delay -gt 15) {
+            Function Get-NewDriveLetter {
+                $UsedDriveLetters = ((Get-Volume).DriveLetter) -join ""
+                 Do {
+                    $DriveLetter = (65..90)| Get-Random | % {[char]$_}
+                    }
+                Until (!$UsedDriveLetters.Contains("$DriveLetter"))
+                $DriveLetter
                 }
-            Until (!$UsedDriveLetters.Contains("$DriveLetter"))
-            $DriveLetter
+            $DriveLetter = "$(Get-NewDriveLetter)" +  ":"
+            Get-WmiObject -Class Win32_volume | Where-Object {$_.Label -eq "CCCOMA_X64FRE_EN-US_DV9"} | Set-WmiInstance -Arguments @{DriveLetter="$driveletter"}
             }
-        $DriveLetter = "$(Get-NewDriveLetter)" +  ":"
-        Get-WmiObject -Class Win32_volume | Where-Object {$_.Label -eq "CCCOMA_X64FRE_EN-US_DV9"} | Set-WmiInstance -Arguments @{DriveLetter="$driveletter"}
+        Start-Sleep -s 1 
+        $delay++
         }
-    Start-Sleep -s 1 
-    $delay++
-    }
-Until (($mountResult | Get-Volume).DriveLetter -ne $NULL)
-($mountResult | Get-Volume).DriveLetter
+    Until (($mountResult | Get-Volume).DriveLetter -ne $NULL)
+    ($mountResult | Get-Volume).DriveLetter
 }
-
 
 Function ConcatenateVHDPath {
 param(
 [string]$VHDPath,
 [string]$VMName
 )
-if ($VHDPath[-1] -eq '\') {
-    $VHDPath + $VMName + ".vhdx"
-    }
-Else {
-    $VHDPath + "\" +  $VMName + ".vhdx"
-    }
+    if ($VHDPath[-1] -eq '\') {
+        $VHDPath + $VMName + ".vhdx"
+        }
+    else {
+        $VHDPath + "\" +  $VMName + ".vhdx"
+        }
 }
 
 Function SmartExit {
@@ -82,19 +87,19 @@ param (
 [switch]$NoHalt,
 [string]$ExitReason
 )
-if (($host.name -eq 'Windows PowerShell ISE Host') -or ($host.Name -eq 'Visual Studio Code Host')) {
-    Write-Host $ExitReason
-    Exit
-    }
-else{
-    if ($NoHalt) {
+    if (($host.name -eq 'Windows PowerShell ISE Host') -or ($host.Name -eq 'Visual Studio Code Host')) {
         Write-Host $ExitReason
         Exit
         }
-    else {
-        Write-Host $ExitReason
-        Read-host -Prompt "Press any key to Exit..."
-        Exit
+    else{
+        if ($NoHalt) {
+            Write-Host $ExitReason
+            Exit
+        }
+        else {
+            Write-Host $ExitReason
+            Read-host -Prompt "Press any key to Exit..."
+            Exit
         }
     }
 }
@@ -158,7 +163,7 @@ param(
             $line = "0Parameters=$Team_ID $Key"
             $new += $line
             }
-        Else {
+        else {
             $new += $line
             }
     }
@@ -168,11 +173,14 @@ param(
     if((Test-Path -Path $DriveLetter\Windows\system32\GroupPolicy\Machine\Scripts\Startup) -eq $true) {} Else {New-Item -Path $DriveLetter\Windows\system32\GroupPolicy\Machine\Scripts\Startup -ItemType directory | Out-Null}
     if((Test-Path -Path $DriveLetter\Windows\system32\GroupPolicy\Machine\Scripts\Shutdown) -eq $true) {} Else {New-Item -Path $DriveLetter\Windows\system32\GroupPolicy\Machine\Scripts\Shutdown -ItemType directory | Out-Null}
     if((Test-Path -Path $DriveLetter\ProgramData\Easy-GPU-P) -eq $true) {} Else {New-Item -Path $DriveLetter\ProgramData\Easy-GPU-P -ItemType directory | Out-Null}
-    Copy-Item -Path $psscriptroot\VMScripts\VDDMonitor.ps1 -Destination $DriveLetter\ProgramData\Easy-GPU-P
     Copy-Item -Path $psscriptroot\VMScripts\VBCableInstall.ps1 -Destination $DriveLetter\ProgramData\Easy-GPU-P
-    Copy-Item -Path $psscriptroot\VMScripts\ParsecVDDInstall.ps1 -Destination $DriveLetter\ProgramData\Easy-GPU-P
+    Copy-Item -Path $psscriptroot\VMScripts\ParsecVDAInstall.ps1 -Destination $DriveLetter\ProgramData\Easy-GPU-P
+    Copy-Item -Path "$psscriptroot\VMScripts\Switch Display to ParsecVDA.bat" -Destination $DriveLetter\ProgramData\Easy-GPU-P
+    Copy-Item -Path $psscriptroot\VMScripts\ParsecVDA.ico -Destination $DriveLetter\ProgramData\Easy-GPU-P
+    Copy-Item -Path $psscriptroot\VMScripts\SwitchDisplay.vbs -Destination $DriveLetter\ProgramData\Easy-GPU-P
     Copy-Item -Path $psscriptroot\VMScripts\ParsecPublic.cer -Destination $DriveLetter\ProgramData\Easy-GPU-P
     Copy-Item -Path $psscriptroot\VMScripts\Parsec.lnk -Destination $DriveLetter\ProgramData\Easy-GPU-P
+    Copy-Item -Path $psscriptroot\VMScripts\DisableOneDriveAutostart.ps1 -Destination $DriveLetter\ProgramData\Easy-GPU-P
     Copy-Item -Path $psscriptroot\gpt.ini -Destination $DriveLetter\Windows\system32\GroupPolicy
     Copy-Item -Path $psscriptroot\User\psscripts.ini -Destination $DriveLetter\Windows\system32\GroupPolicy\User\Scripts
     Copy-Item -Path $psscriptroot\User\Install.ps1 -Destination $DriveLetter\Windows\system32\GroupPolicy\User\Scripts\Logon
@@ -180,7 +188,7 @@ param(
     Copy-Item -Path $psscriptroot\Machine\Install.ps1 -Destination $DriveLetter\Windows\system32\GroupPolicy\Machine\Scripts\Startup
 }
 
-function Convert-WindowsImage {
+Function Convert-WindowsImage {
     <#
     .NOTES
         Copyright (c) Microsoft Corporation.  All rights reserved.
@@ -2642,7 +2650,7 @@ You can use the fields below to configure the VHD or VHDX that you want to creat
 
 }
 
-function Add-WindowsImageTypes {
+Function Add-WindowsImageTypes {
         $code      = @"
 using System;
 using System.Collections.Generic;
@@ -4290,31 +4298,60 @@ VirtualHardDisk
 
 Function Modify-AutoUnattend {
 param (
-[string]$username,
-[string]$password,
-[string]$autologon,
-[string]$hostname,
-[string]$UnattendPath
-    )
-    [xml]$xml = get-content -path $UnattendPath
-    ($xml.unattend.settings.component | where-object {$_.autologon}).autologon.password.value = $password
-    ($xml.unattend.settings.component | where-object {$_.autologon}).autologon.username = $username
-    ($xml.unattend.settings.component | where-object {$_.autologon}).autologon.enabled = $autologon
-    ($xml.unattend.settings.component | where-object {$_.UserAccounts}).UserAccounts.LocalAccounts.localaccount.Group = "Administrators"
-    ($xml.unattend.settings.component | where-object {$_.UserAccounts}).UserAccounts.LocalAccounts.localaccount.Name = $username
-    ($xml.unattend.settings.component | where-object {$_.UserAccounts}).UserAccounts.LocalAccounts.localaccount.DisplayName = $username
-    ($xml.unattend.settings.component | where-object {$_.UserAccounts}).UserAccounts.LocalAccounts.localaccount.Password.Value = $password
-    ($xml.unattend.settings.component | where-object {$_.Computername}).Computername = $hostname
+    [string]$username,
+    [string]$password,
+    [string]$autologon,
+    [string]$hostname,
+    [string]$language,
+    [string]$timezone,
+    [string]$UnattendPath
+)
+    [xml]$xml = Get-Content -Path $UnattendPath
+
+    # Modify autologon settings
+    ($xml.unattend.settings.component | Where-Object { $_.AutoLogon }).AutoLogon.Password.Value = $password
+    ($xml.unattend.settings.component | Where-Object { $_.AutoLogon }).AutoLogon.Username = $username
+    ($xml.unattend.settings.component | Where-Object { $_.AutoLogon }).AutoLogon.Enabled = $autologon
+
+    # Modify local account settings
+    ($xml.unattend.settings.component | Where-Object { $_.UserAccounts }).UserAccounts.LocalAccounts.LocalAccount.Group = "Administrators"
+    ($xml.unattend.settings.component | Where-Object { $_.UserAccounts }).UserAccounts.LocalAccounts.LocalAccount.Name = $username
+    ($xml.unattend.settings.component | Where-Object { $_.UserAccounts }).UserAccounts.LocalAccounts.LocalAccount.DisplayName = $username
+    ($xml.unattend.settings.component | Where-Object { $_.UserAccounts }).UserAccounts.LocalAccounts.LocalAccount.Password.Value = $password
+
+    # Modify computer name
+    ($xml.unattend.settings.component | Where-Object { $_.ComputerName }).ComputerName = $hostname
+
+    # Modify language and input locale settings (both occurrences)
+    $internationalCoreWinPE = ($xml.unattend.settings.component | Where-Object { $_.SetupUILanguage })
+    $internationalCoreWinPE.SetupUILanguage.UILanguage = $language
+    $internationalCoreWinPE.InputLocale = $language
+    $internationalCoreWinPE.SystemLocale = $language
+    $internationalCoreWinPE.UILanguage = $language
+    $internationalCoreWinPE.UILanguageFallback = $language
+    $internationalCoreWinPE.UserLocale = $language
+
+    $internationalCore = ($xml.unattend.settings.component | Where-Object { $_.name -eq 'Microsoft-Windows-International-Core' })
+    $internationalCore.InputLocale = $language
+    $internationalCore.SystemLocale = $language
+    $internationalCore.UILanguage = $language
+    $internationalCore.UILanguageFallback = $language
+    $internationalCore.UserLocale = $language
+
+    # Modify timezone
+    $oobeSystemComponent = $xml.unattend.settings | Where-Object { $_.pass -eq 'oobeSystem' }
+    $shellSetupComponent = $oobeSystemComponent.component | Where-Object { $_.name -eq 'Microsoft-Windows-Shell-Setup' }
+    $shellSetupComponent.TimeZone = $timezone
+
     $xml.Save("$UnattendPath")
 }
 
-function Assign-VMGPUPartitionAdapter {
+Function Assign-VMGPUPartitionAdapter {
 param(
 [string]$VMName,
 [string]$GPUName,
 [decimal]$GPUResourceAllocationPercentage = 100
 )
-    
     $PartitionableGPUList = Get-WmiObject -Class "Msvm_PartitionableGpu" -ComputerName $env:COMPUTERNAME -Namespace "ROOT\virtualization\v2" 
     if ($GPUName -eq "AUTO") {
         $DevicePathName = $PartitionableGPUList.Name[0]
@@ -4354,6 +4391,8 @@ param(
 [string]$Key,
 [string]$username,
 [string]$password,
+[string]$language,
+[string]$timezone,
 [string]$autologon
 )
     $VHDPath = ConcatenateVHDPath -VHDPath $VHDPath -VMName $VMName
@@ -4365,12 +4404,12 @@ param(
     if (Test-Path $vhdPath) {
         SmartExit -ExitReason "Virtual Machine Disk already exists at $vhdPath, please delete existing VHDX or change VMName"
         }
-    Modify-AutoUnattend -username "$username" -password "$password" -autologon $autologon -hostname $VMName -UnattendPath $UnattendPath
+    Modify-AutoUnattend -username "$username" -password "$password" -autologon $autologon -hostname $VMName -language "$language" -timezone "$timezone" -UnattendPath $UnattendPath
     $MaxAvailableVersion = (Get-VMHostSupportedVersion).Version | Where-Object {$_.Major -lt 254}| Select-Object -Last 1 
     Convert-WindowsImage -SourcePath $SourcePath -ISODriveLetter $DriveLetter -Edition $Edition -VHDFormat $Vhdformat -VHDPath $VhdPath -DiskLayout $DiskLayout -UnattendPath $UnattendPath -GPUName $GPUName -Team_ID $Team_ID -Key $Key -SizeBytes $SizeBytes| Out-Null
     if (Test-Path $vhdPath) {
         New-VM -Name $VMName -MemoryStartupBytes $MemoryAmount -VHDPath $VhdPath -Generation 2 -SwitchName $NetworkSwitch -Version $MaxAvailableVersion | Out-Null
-        Set-VM -Name $VMName -ProcessorCount $CPUCores -CheckpointType Disabled -LowMemoryMappedIoSpace 3GB -HighMemoryMappedIoSpace 32GB -GuestControlledCacheTypes $true -AutomaticStopAction ShutDown
+        Set-VM -Name $VMName -ProcessorCount $CPUCores -CheckpointType Disabled -LowMemoryMappedIoSpace 1GB -HighMemoryMappedIoSpace 32GB -GuestControlledCacheTypes $true -AutomaticStopAction Save
         Set-VMMemory -VMName $VMName -DynamicMemoryEnabled $false 
         $CPUManufacturer = Get-CimInstance -ClassName Win32_Processor | Foreach-Object Manufacturer
         $BuildVer = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
@@ -4380,10 +4419,8 @@ param(
             Set-VMProcessor -VMName $VMName -ExposeVirtualizationExtensions $true
             }
         Set-VMHost -ComputerName $ENV:Computername -EnableEnhancedSessionMode $false
-        Set-VMVideo -VMName $VMName -HorizontalResolution 1920 -VerticalResolution 1080
         Set-VMKeyProtector -VMName $VMName -NewLocalKeyProtector
-        Enable-VMTPM -VMName $VMName 
-        Add-VMDvdDrive -VMName $VMName -Path $SourcePath
+        Enable-VMTPM -VMName $VMName
         Assign-VMGPUPartitionAdapter -GPUName $GPUName -VMName $VMName -GPUResourceAllocationPercentage $GPUResourceAllocationPercentage
         Write-Host "INFO   : Starting and connecting to VM"
         vmconnect localhost $VMName
@@ -4399,9 +4436,10 @@ New-GPUEnabledVM @params
 
 Start-VM -Name $params.VMName
 
-SmartExit -ExitReason "If all went well the Virtual Machine will have started, 
-In a few minutes it will load the Windows desktop, 
-when it does, sign into Parsec (a fast remote desktop app)
+SmartExit -ExitReason "If all went well the Virtual Machine will have started. 
+In a few minutes it will load the Windows desktop. 
+When it does, sign into Parsec (a fast remote desktop app),
+switch the display to the ParsecVDA using the shortcut on the desktop
 and connect to the machine using Parsec from another computer. 
 Have fun!
 Sign up to Parsec at https://parsec.app"
