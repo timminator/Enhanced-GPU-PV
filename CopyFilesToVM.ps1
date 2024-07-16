@@ -7,6 +7,7 @@
     SizeBytes  = 40GB
     MemoryAmount = 8GB
     CPUCores = 4
+    # Make sure your specified switch is configured for the external network. A internet connection is required on the first boot.
     NetworkSwitch = "Default Switch"
     VHDPath = "C:\ProgramData\Microsoft\Windows\Virtual Hard Disks\"
     UnattendPath = "$PSScriptRoot"+"\autounattend.xml"
