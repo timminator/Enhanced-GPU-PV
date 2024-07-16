@@ -13,6 +13,7 @@
     UnattendPath = "$PSScriptRoot"+"\autounattend.xml"
     GPUName = "AUTO"
     GPUResourceAllocationPercentage = 50
+    Parsec = $true
     Team_ID = ""
     Key = ""
     Username = "GPUVM"
@@ -152,6 +153,7 @@ If ($ExitReason.Count -gt 0) {
 Function Setup-ParsecInstall {
 param(
 [string]$DriveLetter,
+[bool]$Parsec,
 [string]$Team_ID,
 [string]$Key
 )
@@ -170,23 +172,23 @@ param(
     }
     Set-Content -Value $new -Path "$PSScriptRoot\user\psscripts.ini"
     if((Test-Path -Path $DriveLetter\Windows\system32\GroupPolicy\User\Scripts\Logon) -eq $true) {} Else {New-Item -Path $DriveLetter\Windows\system32\GroupPolicy\User\Scripts\Logon -ItemType directory | Out-Null}
-    if((Test-Path -Path $DriveLetter\Windows\system32\GroupPolicy\User\Scripts\Logoff) -eq $true) {} Else {New-Item -Path $DriveLetter\Windows\system32\GroupPolicy\User\Scripts\Logoff -ItemType directory | Out-Null}
-    if((Test-Path -Path $DriveLetter\Windows\system32\GroupPolicy\Machine\Scripts\Startup) -eq $true) {} Else {New-Item -Path $DriveLetter\Windows\system32\GroupPolicy\Machine\Scripts\Startup -ItemType directory | Out-Null}
-    if((Test-Path -Path $DriveLetter\Windows\system32\GroupPolicy\Machine\Scripts\Shutdown) -eq $true) {} Else {New-Item -Path $DriveLetter\Windows\system32\GroupPolicy\Machine\Scripts\Shutdown -ItemType directory | Out-Null}
     if((Test-Path -Path $DriveLetter\ProgramData\Easy-GPU-P) -eq $true) {} Else {New-Item -Path $DriveLetter\ProgramData\Easy-GPU-P -ItemType directory | Out-Null}
     Copy-Item -Path $psscriptroot\VMScripts\VBCableInstall.ps1 -Destination $DriveLetter\ProgramData\Easy-GPU-P
     Copy-Item -Path $psscriptroot\VMScripts\ParsecVDAInstall.ps1 -Destination $DriveLetter\ProgramData\Easy-GPU-P
     Copy-Item -Path "$psscriptroot\VMScripts\Switch Display to ParsecVDA.bat" -Destination $DriveLetter\ProgramData\Easy-GPU-P
     Copy-Item -Path $psscriptroot\VMScripts\ParsecVDA.ico -Destination $DriveLetter\ProgramData\Easy-GPU-P
     Copy-Item -Path $psscriptroot\VMScripts\SwitchDisplay.vbs -Destination $DriveLetter\ProgramData\Easy-GPU-P
-    Copy-Item -Path $psscriptroot\VMScripts\ParsecPublic.cer -Destination $DriveLetter\ProgramData\Easy-GPU-P
     Copy-Item -Path $psscriptroot\VMScripts\Parsec.lnk -Destination $DriveLetter\ProgramData\Easy-GPU-P
     Copy-Item -Path $psscriptroot\VMScripts\DisableOneDriveAutostart.ps1 -Destination $DriveLetter\ProgramData\Easy-GPU-P
     Copy-Item -Path $psscriptroot\gpt.ini -Destination $DriveLetter\Windows\system32\GroupPolicy
     Copy-Item -Path $psscriptroot\User\psscripts.ini -Destination $DriveLetter\Windows\system32\GroupPolicy\User\Scripts
-    Copy-Item -Path $psscriptroot\User\Install.ps1 -Destination $DriveLetter\Windows\system32\GroupPolicy\User\Scripts\Logon
-    Copy-Item -Path $psscriptroot\Machine\psscripts.ini -Destination $DriveLetter\Windows\system32\GroupPolicy\Machine\Scripts
-    Copy-Item -Path $psscriptroot\Machine\Install.ps1 -Destination $DriveLetter\Windows\system32\GroupPolicy\Machine\Scripts\Startup
+    
+    # Check if Parsec is true and copy the appropriate script
+    if ($Parsec) {
+        Copy-Item -Path "$PSScriptRoot\User\Installation with Parsec.ps1" -Destination "$DriveLetter\Windows\system32\GroupPolicy\User\Scripts\Logon\Install.ps1"
+    } else {
+        Copy-Item -Path "$PSScriptRoot\User\Installation without Parsec.ps1" -Destination "$DriveLetter\Windows\system32\GroupPolicy\User\Scripts\Logon\Install.ps1"
+    }
 }
 
 Function Convert-WindowsImage {
@@ -376,6 +378,12 @@ Function Convert-WindowsImage {
         [string]
         [ValidateNotNullOrEmpty()]
         [string]$ISODriveLetter,
+
+        [Parameter(ParameterSetName="SRC")]
+        #[Alias("Parsec")]
+        [bool]
+        [ValidateNotNullOrEmpty()]
+        [bool]$Parsec,
 
         [Parameter(ParameterSetName="SRC")]
         [Alias("GPU")]
@@ -2502,8 +2510,8 @@ You can use the fields below to configure the VHD or VHDX that you want to creat
             Add-VMGpuPartitionAdapterFiles -GPUName $GPUName -DriveLetter $windowsDrive
             }
 
-            Write-W2VInfo "Setting up Parsec to install at boot"
-            Setup-ParsecInstall -DriveLetter $WindowsDrive -Team_ID $team_id -Key $key
+            Write-W2VInfo "Setting up programs to install at boot"
+            Setup-ParsecInstall -DriveLetter $WindowsDrive -Parsec $Parsec -Team_ID $Team_ID -Key $Key
 
             if ($DiskLayout -eq "UEFI")
             {
@@ -4388,6 +4396,7 @@ param(
 [string]$GPUName,
 [float]$GPUResourceAllocationPercentage,
 [string]$SourcePath,
+[bool]$Parsec,
 [string]$Team_ID,
 [string]$Key,
 [string]$username,
@@ -4407,7 +4416,7 @@ param(
         }
     Modify-AutoUnattend -username "$username" -password "$password" -autologon $autologon -hostname $VMName -language "$language" -timezone "$timezone" -UnattendPath $UnattendPath
     $MaxAvailableVersion = (Get-VMHostSupportedVersion).Version | Where-Object {$_.Major -lt 254}| Select-Object -Last 1 
-    Convert-WindowsImage -SourcePath $SourcePath -ISODriveLetter $DriveLetter -Edition $Edition -VHDFormat $Vhdformat -VHDPath $VhdPath -DiskLayout $DiskLayout -UnattendPath $UnattendPath -GPUName $GPUName -Team_ID $Team_ID -Key $Key -SizeBytes $SizeBytes| Out-Null
+    Convert-WindowsImage -SourcePath $SourcePath -ISODriveLetter $DriveLetter -Edition $Edition -VHDFormat $Vhdformat -VHDPath $VhdPath -DiskLayout $DiskLayout -UnattendPath $UnattendPath -GPUName $GPUName -Parsec $Parsec -Team_ID $Team_ID -Key $Key -SizeBytes $SizeBytes| Out-Null
     if (Test-Path $vhdPath) {
         New-VM -Name $VMName -MemoryStartupBytes $MemoryAmount -VHDPath $VhdPath -Generation 2 -SwitchName $NetworkSwitch -Version $MaxAvailableVersion | Out-Null
         Set-VM -Name $VMName -ProcessorCount $CPUCores -CheckpointType Disabled -LowMemoryMappedIoSpace 1GB -HighMemoryMappedIoSpace 32GB -GuestControlledCacheTypes $true -AutomaticStopAction Save
@@ -4437,10 +4446,32 @@ New-GPUEnabledVM @params
 
 Start-VM -Name $params.VMName
 
-SmartExit -ExitReason "If all went well the Virtual Machine will have started. 
-In a few minutes it will load the Windows desktop. 
+# Define messages for Parsec and non-Parsec scenarios
+$parsecMessage = @"
+If all went well the Virtual Machine will have started.
+In a few minutes it will load the Windows desktop.
 When it does, sign into Parsec (a fast remote desktop app),
 switch the display to the ParsecVDA using the shortcut on the desktop
-and connect to the machine using Parsec from another computer. 
+and connect to the machine using Parsec from another computer.
 Have fun!
-Sign up to Parsec at https://parsec.app"
+Sign up to Parsec at https://parsec.app
+"@
+
+$sunshineMessage = @"
+If all went well the Virtual Machine will have started.
+In a few minutes it will load the Windows desktop.
+You can install and set up Sunshine now. When you are ready,
+switch the display to the ParsecVDA by clicking the Shortcut
+on the desktop and connect to the machine using Moonlight.
+Have fun!
+"@
+
+# Select the appropriate message based on the value of $Parsec
+if ($params.Parsec) {
+    $exitReason = $parsecMessage
+} else {
+    $exitReason = $sunshineMessage
+}
+
+# Call the SmartExit function with the selected message
+SmartExit -ExitReason $exitReason
