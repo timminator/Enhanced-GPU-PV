@@ -19,14 +19,19 @@ Easy-GPU-PV does the following...
 >1) Creates a VM of your choosing.
 >2) Automatically Installs Windows to the VM.
 >3) Partitions your GPU of choice and copies the required driver files to the VM.  
->4) Installs [Parsec](https://parsec.app) to the VM, Parsec is an ultra low latency remote desktop app, use this to connect to the VM.  You can use Parsec for free non commercially. To use Parsec commercially, sign up to a [Parsec For Teams](https://parsec.app/teams) account.
+>4) Installs [Parsec](https://parsec.app) to the VM. Parsec is an ultra low latency remote desktop app, use this to connect to the VM.  You can use Parsec for free non commercially. To use Parsec commercially, sign up to a [Parsec For Teams](https://parsec.app/teams) account.
 
 The original project added a virtual display to the VM only when the user connected to it by relying on the fallback display of the Parsec App and its Privacy Mode.  
-This could lead to some [issues](https://github.com/jamesstringerparsec/Easy-GPU-PV/issues/190). This also meant the screen was disconnected when no user was connected, causing problems for some people including me ;-). When connecting to the VM you were also logged out.  
-This updated version adds a virtual display to your system on startup by taking advantage of another [project](https://github.com/timminator/ParsecVDA-Always-Connected) of mine and it will stay connected until your next shutdown/restart. This resolves the aforementioned issues.  
+This could lead to some [issues](https://github.com/jamesstringerparsec/Easy-GPU-PV/issues/190) and also meant that the screen was disconnected when no user was connected, causing problems for some people including me ;-). When connecting to the VM you were also logged out.  
+This updated version adds a virtual display to the VM on startup by taking advantage of another [project](https://github.com/timminator/ParsecVDA-Always-Connected) of mine and it will stay connected until your next shutdown/restart. This resolves the aforementioned issues.  
 The virtual display is also based on the Parsec Virtual Display Driver, which means that the advantages of a high resolution and high refresh rate up to 4K@240Hz can still be utilized.
+Furthermore the original project installed Parsec even if you wanted to use other streaming services like Sunshine/Moonlight. This was solved in this project by making this step optional so that the user can decide for himself if he wants to use Parsec or not.
 
-There are three more minor changes compared to the original project:
+A summary of the most important changes compared to the original project:
+* Adds a permanently connected virtual display to the VM without relying on the Parsec App
+* Installation of Parsec is now optional  
+
+Minor changes:
 * The installation also disables the OneDrive autostart. It caused problems due to setting up a local account and not a Microsoft account.
 * Adds language and timezone to the configurable parameters of the installation.
 * The installation sets the time for turning off the display to "Never". 
@@ -52,7 +57,7 @@ There are three more minor changes compared to the original project:
 4. In the extracted folder you downloaded, open PreChecks.ps1 in Powershell ISE and run it by using the green play button and copy the GPU listed (or the warnings that you need to fix).
 5. Open CopyFilesToVM.ps1 in Powershell ISE and edit the params section at the top of the file. Further notes regarding these parameters you can find down below.
 6. Run CopyFilesToVM.ps1 with your changes to the params section - this may take 5-10 minutes.
-7. Open and sign into Parsec on the VM. Double click the Shortcut "Switch Display to ParsecVDA" and close the window on the host. Use Parsec to connect to the VM.
+7. Open and sign into Parsec or install and setup Sunshine on the VM. After that double click the shortcut "Switch Display to ParsecVDA" and close the window on the host. Use Parsec or Moonlight to connect to the VM.
 
 You should be good to go!
 
@@ -81,7 +86,8 @@ Some more infos about the Parameters needed to be set in CopyFilesToVM.ps1:
   * ```VHDPath = "C:\ProgramData\Microsoft\Windows\Virtual Hard Disks\"``` - Path to the folder you want the VM disk to be stored in, it must already exist, currently set to default path in Windows 11  
   * ```UnattendPath = "$PSScriptRoot"+"\autounattend.xml"``` -Leave this value alone  
   * ```GPUName = "AUTO"``` - AUTO selects the first available GPU. On Windows 11 you may also use the exact name of the GPU you want to share with the VM in multi GPU situations (GPU selection is not available in Windows 10 and must be set to AUTO)    
-  * ```GPUResourceAllocationPercentage = 50``` - Percentage of the GPU you want to share with the VM   
+  * ```GPUResourceAllocationPercentage = 50``` - Percentage of the GPU you want to share with the VM
+  * ```Parsec = $true``` - Decide if you want to install Parsec or not  
   * ```Team_ID = ""``` - The Parsec for Teams ID if you are a Parsec for Teams Subscriber  
   * ```Key = ""``` - The Parsec for Teams Secret Key if you are a Parsec for Teams Subscriber  
   * ```Username = "GPUVM"``` - The VM Windows Username, do not include special characters, and must be different from the "VMName" value you set  
