@@ -1,18 +1,18 @@
 ﻿$params = @{
-    VMName = "GPUPV3"
-    SourcePath = "D:\ISOs\Win11_23H2_German_x64.iso"
+    VMName = "GPUPV"
+    SourcePath = "C:\Users\james\Downloads\Win11_English_x64.iso"
     Edition    = 6
     VhdFormat  = "VHDX"
     DiskLayout = "UEFI"
     SizeBytes  = 40GB
-    MemoryAmount = 3GB
+    MemoryAmount = 8GB
     CPUCores = 4
     # Make sure your specified switch is configured for the external network. A internet connection is required on the first boot.
-    NetworkSwitch = "External"
+    NetworkSwitch = "Default switch"
     VHDPath = "C:\ProgramData\Microsoft\Windows\Virtual Hard Disks\"
     UnattendPath = "$PSScriptRoot"+"\autounattend.xml"
     GPUName = "AUTO"
-    GPUResourceAllocationPercentage = 25
+    GPUResourceAllocationPercentage = 50
 
     # Valid combinations are: 
     # 1. All four false (just a machine with GPU-PV support) 
@@ -33,10 +33,10 @@
     # Only affects keyboard layout and other minor settings, language is predetermined by the specified ISO
     # If you want to use the default settings by your ISO leave this parameter empty like this: ""  
     # To find languages/region tags use the following link: https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/available-language-packs-for-windows?view=windows-11
-    Language = "de-DE"
+    Language = ""
     # If you want to use the default setting by your ISO leave this parameter empty like this: ""
     # To find your timezone use the following link: https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/default-time-zones?view=windows-11
-    Timezone = "de-DE"
+    Timezone = ""
 }
 
 Import-Module $PSSCriptRoot\Add-VMGpuPartitionAdapterFiles.psm1
