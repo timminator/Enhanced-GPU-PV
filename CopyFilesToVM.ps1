@@ -1,19 +1,30 @@
 ﻿$params = @{
-    VMName = "GPUPV"
-    SourcePath = "C:\Users\james\Downloads\Win11_English_x64.iso"
+    VMName = "GPUPV3"
+    SourcePath = "D:\ISOs\Win11_23H2_German_x64.iso"
     Edition    = 6
     VhdFormat  = "VHDX"
     DiskLayout = "UEFI"
     SizeBytes  = 40GB
-    MemoryAmount = 8GB
+    MemoryAmount = 3GB
     CPUCores = 4
     # Make sure your specified switch is configured for the external network. A internet connection is required on the first boot.
-    NetworkSwitch = "Default Switch"
+    NetworkSwitch = "External"
     VHDPath = "C:\ProgramData\Microsoft\Windows\Virtual Hard Disks\"
     UnattendPath = "$PSScriptRoot"+"\autounattend.xml"
     GPUName = "AUTO"
-    GPUResourceAllocationPercentage = 50
+    GPUResourceAllocationPercentage = 25
+
+    # Valid combinations are: 
+    # 1. All four false (just a machine with GPU-PV support) 
+    # 2. Parsec + ParsecVDA
+    # 3. Parsec + Virtual-Display-Driver (with or without HDR support depending on the build version of your specified ISO) 
+    # 4. Sunshine + Virtual-Display-Driver (with or without HDR support depending on the build version of your specified ISO)
+    # 5. Sunshine + ParsecVDA
     Parsec = $true
+    ParsecVDA = $true
+    Sunshine = $false
+    VirtualDisplayDriver = $false
+
     Team_ID = ""
     Key = ""
     Username = "GPUVM"
@@ -22,10 +33,10 @@
     # Only affects keyboard layout and other minor settings, language is predetermined by the specified ISO
     # If you want to use the default settings by your ISO leave this parameter empty like this: ""  
     # To find languages/region tags use the following link: https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/available-language-packs-for-windows?view=windows-11
-    Language = ""
+    Language = "de-DE"
     # If you want to use the default setting by your ISO leave this parameter empty like this: ""
     # To find your timezone use the following link: https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/default-time-zones?view=windows-11
-    Timezone = ""
+    Timezone = "de-DE"
 }
 
 Import-Module $PSSCriptRoot\Add-VMGpuPartitionAdapterFiles.psm1
@@ -141,6 +152,19 @@ if (($params.VMName -notmatch "^[a-zA-Z0-9]+$") -or ($params.VMName.Length -gt 1
 if (([Environment]::OSVersion.Version.Build -lt 22000) -and ($params.GPUName -ne "AUTO")) {
     $ExitReason += "GPUName must be set to AUTO on Windows 10."
     }
+
+$A = $params.Parsec
+$B = $params.ParsecVDA
+$C = $params.Sunshine
+$D = $params.VirtualDisplayDriver
+
+$countTrue = ($A, $B, $C, $D | Where-Object { $_ }).Count
+
+if (($countTrue -ne 0 -and $countTrue -ne 2) -or
+    ($A -and $C) -or
+    ($B -and $D)) {
+    $ExitReason += "Invalid combination of Parsec, ParsecVDA, Sunshine, and VirtualDisplayDriver. Either all must be false, or exactly two must be true, excluding the cases where both Parsec and Sunshine are true, or both ParsecVDA and VirtualDisplayDriver are true."
+}
 If ($ExitReason.Count -gt 0) {
     Write-Host "Script failed params check due to the following reasons:" -ForegroundColor DarkYellow
     ForEach ($IndividualReason in $ExitReason) {
@@ -150,10 +174,122 @@ If ($ExitReason.Count -gt 0) {
     }
 }
 
+Function Get-BuildVersionSimple {
+param (
+    [string]$SourcePath,
+    [int]$ImageIndex
+)
+    $WindowsImage = Get-WindowsImage -ImagePath $SourcePath -Index $ImageIndex
+    return $WindowsImage.Version
+}
+
+Function Get-BuildVersionExact {
+param (
+    [string]$DriveLetter,  # Drive letter where the ISO is mounted
+    [int]$ImageIndex
+)
+    $mountPath = "$env:TEMP\WIMMount"
+    New-Item -ItemType Directory -Force -Path $mountPath | Out-Null
+
+    try {
+        # Path to the WIM file
+        $wimPath = "${DriveLetter}:\sources\install.wim"
+   
+        # Mount the WIM file
+        Write-Host "INFO   : Mounting WIM file..."
+        dism /Mount-Wim /WimFile:$wimPath /index:$ImageIndex /MountDir:$mountPath -readonly | Out-Null
+
+        # Load the registry hive
+        $registryPath = "$mountPath\Windows\system32\config\SOFTWARE"
+        reg load HKLM\TEMP $registryPath | Out-Null
+
+        # Query the registry key
+        $query = reg query "HKLM\TEMP\Microsoft\Windows NT\CurrentVersion" /v CurrentBuild
+        $buildVersion = ($query | Select-String -Pattern "CurrentBuild\s+REG_SZ\s+\d+" -AllMatches).Matches.Value -replace ".*\s+REG_SZ\s+", ""
+
+        # Unload the registry hive
+        reg unload HKLM\TEMP | Out-Null
+
+        # Unmount the WIM file
+        Write-Host "INFO   : Unmounting WIM file..."
+        dism /Unmount-Wim /MountDir:$mountPath /discard | Out-Null
+
+        return $buildVersion
+    }
+    catch {
+        throw "Failed to retrieve build version for ParsecVDA: $_"
+    }
+    finally {
+        Remove-Item -Path $mountPath -Recurse -Force
+    }
+}
+
+Function Check-BuildVersionforParsecVDA {
+param (
+    [string]$Driveletter,
+    [string]$SourcePath,
+    [int]$ImageIndex,
+    [bool]$ParsecVDA
+)
+    if (!$ParsecVDA) {
+        return
+    }
+
+    $buildVersion = Get-BuildVersionSimple -SourcePath $SourcePath -ImageIndex $ImageIndex
+    
+    # Define version constants
+    $win10_22H2_version = [version]"10.0.19045"
+    $win2004 = [version]"10.0.19041"
+    
+    # Check if build version is between 19041 and 19045
+    if ($buildVersion -lt $win10_22H2_version -and $buildVersion -ge $win2004) {
+        Write-Host "INFO   : Checking ParsecVDA compatibility under specified Windows 10 ISO. This could take awhile..."
+        $buildVersion = Get-BuildVersionExact -Driveletter $Driveletter -ImageIndex $ImageIndex
+        
+        # Define version constants
+        $win10_21H2_int = "19044"
+       
+        # Check if build version is less than Windows 10 21H2 when the ParsecVDA is selected
+        if ($buildVersion -lt $win10_21H2_int) {
+            throw "Specified Windows image does not meet the requirements to install the ParsecVDA."
+        } 
+    } elseif ($buildVersion -ge $win10_22H2_version) {
+        return
+    } else {
+        throw "Specified Windows image does not meet the requirements to install the ParsecVDA."
+    }
+}
+
+Function Check-BuildVersionforVDD {
+param (
+    [string]$SourcePath,
+    [int]$ImageIndex,
+    [bool]$VirtualDisplayDriver
+)
+    # Initialize $withHDR
+    $withHDR = $false
+
+    $buildVersion = Get-BuildVersionSimple -SourcePath $SourcePath -ImageIndex $ImageIndex
+
+    # Define version constants
+    $win11_23H2 = [version]"10.0.22621"
+       
+    # Check if build version is greater than or equal to Windows 11 23H2
+    if ($buildVersion -ge $win11_23H2 -and $VirtualDisplayDriver) {
+        $withHDR = $true
+    }
+
+    # Return the value of $withHDR
+    return $withHDR
+}
+
 Function Setup-ParsecInstall {
 param(
 [string]$DriveLetter,
 [bool]$Parsec,
+[bool]$ParsecVDA,
+[bool]$Sunshine,
+[bool]$VirtualDisplayDriver,
 [string]$Team_ID,
 [string]$Key
 )
@@ -175,19 +311,36 @@ param(
     if((Test-Path -Path $DriveLetter\ProgramData\Easy-GPU-P) -eq $true) {} Else {New-Item -Path $DriveLetter\ProgramData\Easy-GPU-P -ItemType directory | Out-Null}
     Copy-Item -Path $psscriptroot\VMScripts\VBCableInstall.ps1 -Destination $DriveLetter\ProgramData\Easy-GPU-P
     Copy-Item -Path $psscriptroot\VMScripts\ParsecVDAInstall.ps1 -Destination $DriveLetter\ProgramData\Easy-GPU-P
+    Copy-Item -Path $psscriptroot\VMScripts\VirtualDisplayDriverInstall.ps1 -Destination $DriveLetter\ProgramData\Easy-GPU-P
+    Copy-Item -Path $psscriptroot\VMScripts\VirtualDisplayDriverHDRInstall.ps1 -Destination $DriveLetter\ProgramData\Easy-GPU-P
     Copy-Item -Path "$psscriptroot\VMScripts\Switch Display to ParsecVDA.bat" -Destination $DriveLetter\ProgramData\Easy-GPU-P
+    Copy-Item -Path "$psscriptroot\VMScripts\Switch Display to Virtual Display.bat" -Destination $DriveLetter\ProgramData\Easy-GPU-P
     Copy-Item -Path $psscriptroot\VMScripts\ParsecVDA.ico -Destination $DriveLetter\ProgramData\Easy-GPU-P
-    Copy-Item -Path $psscriptroot\VMScripts\SwitchDisplay.vbs -Destination $DriveLetter\ProgramData\Easy-GPU-P
+    Copy-Item -Path $psscriptroot\VMScripts\VirtualDisplayDriver.ico -Destination $DriveLetter\ProgramData\Easy-GPU-P
+    Copy-Item -Path $psscriptroot\VMScripts\SwitchDisplayParsecVDA.vbs -Destination $DriveLetter\ProgramData\Easy-GPU-P
+    Copy-Item -Path $psscriptroot\VMScripts\SwitchDisplayVDD.vbs -Destination $DriveLetter\ProgramData\Easy-GPU-P
     Copy-Item -Path $psscriptroot\VMScripts\Parsec.lnk -Destination $DriveLetter\ProgramData\Easy-GPU-P
     Copy-Item -Path $psscriptroot\VMScripts\DisableOneDriveAutostart.ps1 -Destination $DriveLetter\ProgramData\Easy-GPU-P
     Copy-Item -Path $psscriptroot\gpt.ini -Destination $DriveLetter\Windows\system32\GroupPolicy
     Copy-Item -Path $psscriptroot\User\psscripts.ini -Destination $DriveLetter\Windows\system32\GroupPolicy\User\Scripts
     
-    # Check if Parsec is true and copy the appropriate script
-    if ($Parsec) {
-        Copy-Item -Path "$PSScriptRoot\User\Installation with Parsec.ps1" -Destination "$DriveLetter\Windows\system32\GroupPolicy\User\Scripts\Logon\Install.ps1"
+    $withHDR = Check-BuildVersionforVDD -SourcePath $SourcePath -ImageIndex $ImageIndex -VirtualDisplayDriver $VirtualDisplayDriver
+   
+    # Check which streaming software and Virtual Display was chosen and copy the appropriate script
+    if ($Parsec -and $ParsecVDA) {
+        Copy-Item -Path "$PSScriptRoot\User\Installation with Parsec + ParsecVDA.ps1" -Destination "$DriveLetter\Windows\system32\GroupPolicy\User\Scripts\Logon\Install.ps1"
+    } elseif ($Parsec -and $VirtualDisplayDriver -and $withHDR) {
+        Copy-Item -Path "$PSScriptRoot\User\Installation with Parsec + VirtualDisplayDriverHDR.ps1" -Destination "$DriveLetter\Windows\system32\GroupPolicy\User\Scripts\Logon\Install.ps1"
+    } elseif ($Parsec -and $VirtualDisplayDriver) {
+        Copy-Item -Path "$PSScriptRoot\User\Installation with Parsec + VirtualDisplayDriver.ps1" -Destination "$DriveLetter\Windows\system32\GroupPolicy\User\Scripts\Logon\Install.ps1"
+    } elseif ($Sunshine -and $ParsecVDA) {
+        Copy-Item -Path "$PSScriptRoot\User\Installation with Sunshine + ParsecVDA.ps1" -Destination "$DriveLetter\Windows\system32\GroupPolicy\User\Scripts\Logon\Install.ps1"
+    } elseif ($Sunshine -and $VirtualDisplayDriver -and $withHDR) {
+        Copy-Item -Path "$PSScriptRoot\User\Installation with Sunshine + VirtualDisplayDriverHDR.ps1" -Destination "$DriveLetter\Windows\system32\GroupPolicy\User\Scripts\Logon\Install.ps1"
+    } elseif ($Sunshine -and $VirtualDisplayDriver) {
+        Copy-Item -Path "$PSScriptRoot\User\Installation with Sunshine + VirtualDisplayDriver.ps1" -Destination "$DriveLetter\Windows\system32\GroupPolicy\User\Scripts\Logon\Install.ps1"
     } else {
-        Copy-Item -Path "$PSScriptRoot\User\Installation without Parsec.ps1" -Destination "$DriveLetter\Windows\system32\GroupPolicy\User\Scripts\Logon\Install.ps1"
+        Copy-Item -Path "$PSScriptRoot\User\Installation just GPU-PV.ps1" -Destination "$DriveLetter\Windows\system32\GroupPolicy\User\Scripts\Logon\Install.ps1"
     }
 }
 
@@ -384,6 +537,24 @@ Function Convert-WindowsImage {
         [bool]
         [ValidateNotNullOrEmpty()]
         [bool]$Parsec,
+
+        [Parameter(ParameterSetName="SRC")]
+        #[Alias("ParsecVDA")]
+        [bool]
+        [ValidateNotNullOrEmpty()]
+        [bool]$ParsecVDA,
+
+        [Parameter(ParameterSetName="SRC")]
+        #[Alias("Sunshine")]
+        [bool]
+        [ValidateNotNullOrEmpty()]
+        [bool]$Sunshine,
+
+        [Parameter(ParameterSetName="SRC")]
+        #[Alias("VirtualDisplayDriver")]
+        [bool]
+        [ValidateNotNullOrEmpty()]
+        [bool]$VirtualDisplayDriver,
 
         [Parameter(ParameterSetName="SRC")]
         [Alias("GPU")]
@@ -2049,6 +2220,9 @@ You can use the fields below to configure the VHD or VHDX that you want to creat
 
             $ImageIndex = $WindowsImage[0].ImageIndex
 
+            # Call the Check-BuildVersion function
+            Check-BuildVersionforParsecVDA -Driveletter $Driveletter -SourcePath $SourcePath -ImageIndex $ImageIndex -ParsecVDA $ParsecVDA
+
             # We're good.  Open the WIM container.
             # NOTE: this is only required because we want to get the XML-based meta-data at the end.  Is there a better way?
             # If we can get this information from DISM cmdlets, we can remove the openWim constructs
@@ -2511,7 +2685,7 @@ You can use the fields below to configure the VHD or VHDX that you want to creat
             }
 
             Write-W2VInfo "Setting up programs to install at boot"
-            Setup-ParsecInstall -DriveLetter $WindowsDrive -Parsec $Parsec -Team_ID $Team_ID -Key $Key
+            Setup-ParsecInstall -DriveLetter $WindowsDrive -Parsec $Parsec -ParsecVDA $ParsecVDA -Sunshine $Sunshine -VirtualDisplayDriver $VirtualDisplayDriver -Team_ID $Team_ID -Key $Key
 
             if ($DiskLayout -eq "UEFI")
             {
@@ -4397,6 +4571,9 @@ param(
 [float]$GPUResourceAllocationPercentage,
 [string]$SourcePath,
 [bool]$Parsec,
+[bool]$ParsecVDA,
+[bool]$Sunshine,
+[bool]$VirtualDisplayDriver,
 [string]$Team_ID,
 [string]$Key,
 [string]$username,
@@ -4416,7 +4593,7 @@ param(
         }
     Modify-AutoUnattend -username "$username" -password "$password" -autologon $autologon -hostname $VMName -language "$language" -timezone "$timezone" -UnattendPath $UnattendPath
     $MaxAvailableVersion = (Get-VMHostSupportedVersion).Version | Where-Object {$_.Major -lt 254}| Select-Object -Last 1 
-    Convert-WindowsImage -SourcePath $SourcePath -ISODriveLetter $DriveLetter -Edition $Edition -VHDFormat $Vhdformat -VHDPath $VhdPath -DiskLayout $DiskLayout -UnattendPath $UnattendPath -GPUName $GPUName -Parsec $Parsec -Team_ID $Team_ID -Key $Key -SizeBytes $SizeBytes| Out-Null
+    Convert-WindowsImage -SourcePath $SourcePath -ISODriveLetter $DriveLetter -Edition $Edition -VHDFormat $Vhdformat -VHDPath $VhdPath -DiskLayout $DiskLayout -UnattendPath $UnattendPath -GPUName $GPUName -Parsec $Parsec -ParsecVDA $ParsecVDA -Sunshine $Sunshine -VirtualDisplayDriver $VirtualDisplayDriver -Team_ID $Team_ID -Key $Key -SizeBytes $SizeBytes| Out-Null
     if (Test-Path $vhdPath) {
         New-VM -Name $VMName -MemoryStartupBytes $MemoryAmount -VHDPath $VhdPath -Generation 2 -SwitchName $NetworkSwitch -Version $MaxAvailableVersion | Out-Null
         Set-VM -Name $VMName -ProcessorCount $CPUCores -CheckpointType Disabled -LowMemoryMappedIoSpace 1GB -HighMemoryMappedIoSpace 32GB -GuestControlledCacheTypes $true -AutomaticStopAction Save
@@ -4447,30 +4624,64 @@ New-GPUEnabledVM @params
 Start-VM -Name $params.VMName
 
 # Define messages for Parsec and non-Parsec scenarios
-$parsecMessage = @"
+$parsecparsecvdaMessage = @"
 If all went well the Virtual Machine will have started.
 In a few minutes it will load the Windows desktop.
-When it does, sign into Parsec (a fast remote desktop app),
-switch the display to the ParsecVDA using the shortcut on the desktop
+When it does, sign into Parsec (a fast remote desktop app), switch
+the display to the ParsecVDA using the shortcut on the desktop
 and connect to the machine using Parsec from another computer.
 Have fun!
 Sign up to Parsec at https://parsec.app
 "@
 
-$sunshineMessage = @"
+$parsecvddMessage = @"
 If all went well the Virtual Machine will have started.
 In a few minutes it will load the Windows desktop.
-You can install and set up Sunshine now. When you are ready,
-switch the display to the ParsecVDA by clicking the Shortcut
+When it does, sign into Parsec (a fast remote desktop app), switch
+the display to the Virtual Display using the shortcut on the desktop
+and connect to the machine using Parsec from another computer.
+Have fun!
+Sign up to Parsec at https://parsec.app
+"@
+
+$sunshinevddMessage = @"
+If all went well the Virtual Machine will have started.
+In a few minutes it will load the Windows desktop.
+You can set up Sunshine now. You can find it under the
+hidden icons in the taskbar. When you are ready, switch
+the display to the Virtual Display by clicking the shortcut
 on the desktop and connect to the machine using Moonlight.
 Have fun!
 "@
 
+$sunshineparsecvdaMessage = @"
+If all went well the Virtual Machine will have started.
+In a few minutes it will load the Windows desktop.
+You can set up Sunshine now. You can find it under the
+hidden icons in the taskbar. When you are ready, switch
+the display to the ParsecVDA by clicking the shortcut
+on the desktop and connect to the machine using Moonlight.
+Have fun!
+"@
+
+$justgpupvMessage = @"
+If all went well the Virtual Machine will have started.
+In a few minutes it will load the Windows desktop.
+Your Virtual Machine now has access to your GPU!
+Have fun!
+"@
+
 # Select the appropriate message based on the value of $Parsec
-if ($params.Parsec) {
-    $exitReason = $parsecMessage
+if ($params.Parsec -and $params.ParsecVDA) {
+    $exitReason = $parsecparsecvdaMessage
+} elseif ($params.Parsec -and $params.VirtualDisplayDriver) {
+    $exitReason = $parsecvddMessage
+} elseif ($params.Sunshine -and $params.VirtualDisplayDriver) {
+    $exitReason = $sunshinevddMessage
+} elseif ($params.Sunshine -and $params.ParsecVDA) {
+    $exitReason = $sunshineparsecvdaMessage
 } else {
-    $exitReason = $sunshineMessage
+    $exitReason = $justgpupvMessage
 }
 
 # Call the SmartExit function with the selected message
